@@ -76,7 +76,7 @@ body::before {
 
 /* ── UTILITIES ── */
 .wrap { width: 100%; max-width: 1180px; margin: 0 auto; padding: 0 24px; }
-.gradient-text { background: var(--grad); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.gradient-text { background: var(--grad); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent; }
 
 /* ── NAVBAR ── */
 .navbar {
