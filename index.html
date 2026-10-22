@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%236366f1'/><stop offset='100%' stop-color='%23a855f7'/></linearGradient></defs><rect width='100' height='100' rx='24' fill='url(%23g)'/><path d='M30 40 L50 25 L70 40 L70 60 L50 75 L30 60 Z' fill='none' stroke='white' stroke-width='7' stroke-linejoin='round'/><circle cx='50' cy='50' r='10' fill='white'/></svg>" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Comprz — Kompres PDF, JPG, PNG, WEBP, HEIC & Resize Online</title>
+    <meta name="description" content="Kompresi file modern dan 100% privat langsung di browsermu. Kompres PDF, JPG, PNG, WEBP, HEIC, resize foto instan, batch compress ke ZIP, serta hapus metadata EXIF otomatis." />
+    <meta name="keywords" content="kompres pdf, kompres jpg, kompres png, kompres webp, kompres heic, resize foto, hapus exif, batch compress, comprz" />
+    <meta property="og:title" content="Comprz — Kompres PDF, Foto & Resize Online Gratis" />
+    <meta property="og:description" content="100% Client-Side. File Anda tidak pernah diunggah ke server. Cepat, aman, dan tanpa batas ukuran." />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Navbar -->
+      <nav class="navbar">
+        <div class="container nav-container">
+          <div class="logo" id="logoBtn">
+            <div class="logo-icon-box">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+                <path d="M12 12v9" />
+                <path d="m8 17 4 4 4-4" />
+              </svg>
+            </div>
+            <div>
+              <span class="logo-text">Comprz</span>
+              <span class="logo-tag">v1.0 Pro</span>
+            </div>
+          </div>
+
+          <div class="nav-actions">
+            <div class="privacy-badge">
+              <span class="privacy-dot"></span>
+              <span>100% Privat (Client-Side)</span>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <!-- Main Content -->
+      <main class="container">
+        <!-- Hero Section -->
+        <header class="hero">
+          <div class="hero-pill">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            <span>Diproses di Perangkat Anda • Tanpa Upload Server • Bebas Kuota</span>
+          </div>
+          <h1 class="hero-title">
+            Kompresi Ekstra Kecil,<br />
+            <span class="hero-gradient-text">Kualitas Tetap Tajam & Jernih</span>
+          </h1>
+          <p class="hero-subtitle">
+            Alat all-in-one untuk kompres <strong>PDF, JPG, PNG, WEBP, HEIC</strong>, ubah dimensi resolusi foto, proses batch puluhan file sekaligus, serta pembersihan data EXIF otomatis.
+          </p>
+
+          <!-- Format Chips -->
+          <div class="features-pills">
+            <span class="format-chip"><span class="chip-dot dot-pdf"></span> PDF Multi-Halaman</span>
+            <span class="format-chip"><span class="chip-dot dot-jpg"></span> JPG / JPEG</span>
+            <span class="format-chip"><span class="chip-dot dot-png"></span> PNG Transparan</span>
+            <span class="format-chip"><span class="chip-dot dot-webp"></span> WEBP Ringan</span>
+            <span class="format-chip"><span class="chip-dot dot-heic"></span> HEIC / Apple</span>
+            <span class="format-chip"><span class="chip-dot dot-exif"></span> Hapus EXIF & GPS</span>
+          </div>
+
+          <!-- Mode Tabs -->
+          <div class="tabs-wrapper">
+            <div class="tabs-container" role="tablist">
+              <button class="tab-btn active" id="tabBatch" data-tab="batch" role="tab" aria-selected="true">
+                <i data-lucide="layers"></i>
+                <span>Semua Format (Batch)</span>
+              </button>
+              <button class="tab-btn" id="tabPhoto" data-tab="photo" role="tab" aria-selected="false">
+                <i data-lucide="maximize-2"></i>
+                <span>Foto + Resize & EXIF</span>
+              </button>
+              <button class="tab-btn" id="tabPdf" data-tab="pdf" role="tab" aria-selected="false">
+                <i data-lucide="file-text"></i>
+                <span>Kompres Dokumen PDF</span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <!-- Main Workspace Card -->
+        <section class="glass-card">
+          <!-- Dropzone -->
+          <div class="dropzone" id="dropzone">
+            <div class="dropzone-icon-circle">
+              <i data-lucide="upload-cloud" style="width: 40px; height: 40px;"></i>
+            </div>
+            <h2 class="dropzone-title" id="dropzoneTitle">Tarik & Lepas File ke Sini</h2>
+            <p class="dropzone-subtitle" id="dropzoneSubtitle">
+              Mendukung PDF, JPG, PNG, WEBP, dan HEIC. Bisa pilih puluhan file sekaligus.
+            </p>
+            <input type="file" id="fileInput" class="file-input" multiple accept=".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf,image/*,application/pdf" />
+            <button type="button" class="btn-browse" id="browseBtn">
+              <i data-lucide="folder-plus"></i>
+              <span>Pilih Berkas File</span>
+            </button>
+            <div class="dropzone-footer">
+              <span class="dropzone-badge"><i data-lucide="shield-check" style="width: 14px; height: 14px; color: #10b981;"></i> EXIF Dihapus Otomatis</span>
+              <span class="dropzone-badge"><i data-lucide="hard-drive" style="width: 14px; height: 14px; color: #38bdf8;"></i> Tanpa Batas Ukuran</span>
+              <span class="dropzone-badge"><i data-lucide="archive" style="width: 14px; height: 14px; color: #a78bfa;"></i> Unduh Sekaligus (.ZIP)</span>
+            </div>
+          </div>
+
+          <!-- Controls Section -->
+          <div class="controls-panel" id="controlsPanel">
+            <div class="controls-header">
+              <div class="controls-title">
+                <i data-lucide="sliders" style="color: #818cf8;"></i>
+                <span id="panelTitle">Pengaturan Kompresi Global</span>
+              </div>
+              <div class="exif-badge-indicator" style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #34d399; background: rgba(16, 185, 129, 0.1); padding: 4px 10px; border-radius: 9999px;">
+                <i data-lucide="shield" style="width: 14px; height: 14px;"></i>
+                <span>Sanitasi EXIF & GPS: Aktif</span>
+              </div>
+            </div>
+
+            <!-- Tab 1: Batch & Standard Controls -->
+            <div id="batchControls" class="controls-grid">
+              <div class="control-group">
+                <label class="control-label" for="qualitySlider">
+                  <span>Tingkat Kualitas Kompresi</span>
+                  <span class="control-value" id="qualityValue">75%</span>
+                </label>
+                <div class="slider-container">
+                  <input type="range" id="qualitySlider" class="range-slider" min="10" max="95" value="75" step="1" />
+                  <div class="slider-marks">
+                    <span>File Terkecil (10%)</span>
+                    <span>Seimbang (75%)</span>
+                    <span>Kualitas Maks (95%)</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="control-group">
+                <label class="control-label" for="targetFormatSelect">
+                  <span>Format Keluaran Gambar</span>
+                </label>
+                <select id="targetFormatSelect" class="select-input">
+                  <option value="original">Pertahankan Format Asli (Auto)</option>
+                  <option value="image/webp">Konversi ke WEBP (Paling Hemat)</option>
+                  <option value="image/jpeg">Konversi ke JPG / JPEG</option>
+                  <option value="image/png">Konversi ke PNG</option>
+                </select>
+              </div>
+
+              <div class="control-group">
+                <label class="control-label" for="quickResizeSelect">
+                  <span>Skala Ukuran (Resize Cepat)</span>
+                </label>
+                <select id="quickResizeSelect" class="select-input">
+                  <option value="100">100% (Ukuran Asli)</option>
+                  <option value="75">75% Resolusi</option>
+                  <option value="50">50% Resolusi (Sangat Hemat)</option>
+                  <option value="25">25% Resolusi (Mini Thumbnail)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Tab 2: Specific Photo + Resize Controls -->
+            <div id="photoControls" class="controls-grid" style="display: none;">
+              <div class="control-group">
+                <label class="control-label">
+                  <span>Preset Ukuran Populer</span>
+                </label>
+                <div class="preset-grid">
+                  <button type="button" class="btn-preset" data-w="1080" data-h="1080">IG Post (1:1)</button>
+                  <button type="button" class="btn-preset" data-w="1080" data-h="1920">IG Story / TikTok</button>
+                  <button type="button" class="btn-preset" data-w="1920" data-h="1080">Full HD (1080p)</button>
+                  <button type="button" class="btn-preset" data-w="1280" data-h="720">HD Web (720p)</button>
+                  <button type="button" class="btn-preset" data-w="354" data-h="472">Pas Foto 3x4</button>
+                  <button type="button" class="btn-preset" data-w="472" data-h="708">Pas Foto 4x6</button>
+                  <button type="button" class="btn-preset" data-w="500" data-h="500">Avatar / Profil</button>
+                </div>
+              </div>
+
+              <div class="control-group">
+                <label class="control-label">
+                  <span>Dimensi Kustom (Piksel)</span>
+                  <span style="font-size: 0.75rem; color: var(--text-muted);" id="ratioStatusText">Rasio Terkunci</span>
+                </label>
+                <div class="dimensions-row">
+                  <div class="dim-input-wrap">
+                    <input type="number" id="customWidthInput" class="text-input" placeholder="Lebar (px)" min="10" max="10000" />
+                    <span class="dim-label">L</span>
+                  </div>
+                  <button type="button" id="btnLockRatio" class="btn-lock locked" title="Kunci / Lepas Rasio Aspek">
+                    <i data-lucide="lock" style="width: 16px; height: 16px;"></i>
+                  </button>
+                  <div class="dim-input-wrap">
+                    <input type="number" id="customHeightInput" class="text-input" placeholder="Tinggi (px)" min="10" max="10000" />
+                    <span class="dim-label">T</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="control-group">
+                <label class="control-label" for="photoQualitySlider">
+                  <span>Kualitas Foto</span>
+                  <span class="control-value" id="photoQualityValue">80%</span>
+                </label>
+                <div class="slider-container">
+                  <input type="range" id="photoQualitySlider" class="range-slider" min="10" max="95" value="80" step="1" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 3: PDF Specific Controls -->
+            <div id="pdfControls" class="controls-grid" style="display: none;">
+              <div class="control-group" style="grid-column: 1 / -1;">
+                <label class="control-label">
+                  <span>Pilihan Level Kompresi PDF</span>
+                </label>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 6px;">
+                  <label class="pdf-preset-card" style="border: 1px solid var(--border-subtle); padding: 14px; border-radius: var(--radius-md); background: #0b1120; cursor: pointer; display: flex; gap: 10px; align-items: flex-start;">
+                    <input type="radio" name="pdfPreset" value="ekstrem" style="margin-top: 4px;" />
+                    <div>
+                      <div style="font-weight: 700; color: #f87171; font-size: 0.92rem;">Kompresi Ekstrem</div>
+                      <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">Sangat kecil untuk batas CPNS, portal lamaran & email (&lt; 500KB - 1MB).</div>
+                    </div>
+                  </label>
+
+                  <label class="pdf-preset-card" style="border: 1px solid var(--accent-primary); padding: 14px; border-radius: var(--radius-md); background: rgba(99, 102, 241, 0.1); cursor: pointer; display: flex; gap: 10px; align-items: flex-start;">
+                    <input type="radio" name="pdfPreset" value="rekomendasi" checked style="margin-top: 4px;" />
+                    <div>
+                      <div style="font-weight: 700; color: #818cf8; font-size: 0.92rem;">Rekomendasi (Seimbang)</div>
+                      <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">Pilihan terbaik: hemat 60-80% ukuran dengan teks & grafik tetap tajam terbaca.</div>
+                    </div>
+                  </label>
+
+                  <label class="pdf-preset-card" style="border: 1px solid var(--border-subtle); padding: 14px; border-radius: var(--radius-md); background: #0b1120; cursor: pointer; display: flex; gap: 10px; align-items: flex-start;">
+                    <input type="radio" name="pdfPreset" value="ringan" style="margin-top: 4px;" />
+                    <div>
+                      <div style="font-weight: 700; color: #34d399; font-size: 0.92rem;">Kompresi Ringan</div>
+                      <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">Pertahankan resolusi tinggi 200 DPI dengan optimasi struktur objek PDF.</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Batch Action Summary Bar (shown when files exist) -->
+          <div class="batch-bar" id="batchBar" style="display: none;">
+            <div class="batch-stats">
+              <div class="stat-item">
+                <span class="stat-label">File Diproses</span>
+                <span class="stat-val" id="statCount">0</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Ukuran Awal</span>
+                <span class="stat-val" id="statOrigSize">0 MB</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Ukuran Hasil</span>
+                <span class="stat-val" id="statNewSize">0 MB</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Total Hemat</span>
+                <span class="stat-val saving" id="statSavings">0 MB (-0%)</span>
+              </div>
+            </div>
+
+            <div class="batch-actions">
+              <button type="button" class="btn-clear-all" id="btnClearAll">
+                <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
+                <span>Hapus Semua</span>
+              </button>
+              <button type="button" class="btn-download-all" id="btnDownloadAll">
+                <i data-lucide="archive" style="width: 18px; height: 18px;"></i>
+                <span>Unduh Semua (.ZIP)</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- File Queue List -->
+          <div class="queue-section" id="queueSection" style="display: none;">
+            <div class="queue-grid" id="queueGrid">
+              <!-- Dynamically populated cards -->
+            </div>
+          </div>
+        </section>
+
+        <!-- Feature Benefits Grid -->
+        <section class="info-section">
+          <div class="info-header">
+            <h2 class="info-title">Mengapa Memilih Comprz?</h2>
+            <p class="info-subtitle">Dirancang khusus untuk kecepatan, privasi tanpa kompromi, dan fleksibilitas tanpa batas.</p>
+          </div>
+
+          <div class="info-grid">
+            <div class="info-card">
+              <div class="info-icon-box">
+                <i data-lucide="shield-check"></i>
+              </div>
+              <h3 class="info-card-title">1. Privasi 100% Client-Side</h3>
+              <p class="info-card-desc">
+                Tidak ada satupun file Anda yang dikirim ke server. Seluruh proses decoding, resize, dan kompresi berlangsung di browser Anda melalui WebAssembly.
+              </p>
+            </div>
+
+            <div class="info-card">
+              <div class="info-icon-box" style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.3); color: #34d399;">
+                <i data-lucide="map-pin-off"></i>
+              </div>
+              <h3 class="info-card-title">2. Pembersih EXIF & Lokasi GPS</h3>
+              <p class="info-card-desc">
+                Hapus otomatis jejak metadata sensitif seperti titik koordinat GPS rumah Anda, seri kamera ponsel, dan waktu pengambilan foto sebelum dibagikan ke publik.
+              </p>
+            </div>
+
+            <div class="info-card">
+              <div class="info-icon-box" style="background: rgba(236, 72, 153, 0.15); border-color: rgba(236, 72, 153, 0.3); color: #f472b6;">
+                <i data-lucide="smartphone"></i>
+              </div>
+              <h3 class="info-card-title">3. Dukungan Lengkap HEIC Apple</h3>
+              <p class="info-card-desc">
+                Punya foto dari iPhone berformat HEIC? Comprz langsung membacanya tanpa aplikasi tambahan dan mengonversinya menjadi JPG atau WEBP yang ringan.
+              </p>
+            </div>
+
+            <div class="info-card">
+              <div class="info-icon-box" style="background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.3); color: #fbbf24;">
+                <i data-lucide="layers"></i>
+              </div>
+              <h3 class="info-card-title">4. Batch Kompres & ZIP Instan</h3>
+              <p class="info-card-desc">
+                Punya 50 foto atau berkas dokumen sekaligus? Masukkan semuanya dalam satu kali tarik, pantau statusnya, dan download satu bundle arsip ZIP dengan 1 klik.
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <!-- Before / After Comparison Modal -->
+      <div class="modal-overlay" id="compareModal" role="dialog" aria-modal="true">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3 class="modal-title" id="modalFileName">Perbandingan Kualitas Gambar</h3>
+            <button type="button" class="btn-close-modal" id="btnCloseModal">
+              <i data-lucide="x" style="width: 18px; height: 18px;"></i>
+            </button>
+          </div>
+
+          <div style="font-size: 0.85rem; color: var(--text-muted); text-align: center;">
+            Geser pemisah ke kiri atau ke kanan untuk membandingkan foto asli (Kiri) vs hasil kompresi (Kanan).
+          </div>
+
+          <div class="compare-container" id="compareContainer">
+            <div class="compare-split-wrap" id="splitWrap">
+              <img id="imgCompressed" class="compare-compressed" alt="Hasil Kompresi" />
+              <div class="compare-original-clipped" id="origClipped">
+                <img id="imgOriginal" alt="Foto Asli" />
+              </div>
+              <div class="compare-slider-control" id="sliderHandle">
+                <div class="compare-handle">
+                  <i data-lucide="move-horizontal" style="width: 16px; height: 16px;"></i>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-meta-grid">
+            <div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">Foto Asli:</div>
+              <div id="modalOrigMeta" style="font-weight: 600; font-family: var(--font-mono); font-size: 0.9rem;">-</div>
+            </div>
+            <div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">Hasil Kompresi Comprz:</div>
+              <div id="modalNewMeta" style="font-weight: 600; font-family: var(--font-mono); font-size: 0.9rem; color: #38bdf8;">-</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toast Container -->
+      <div class="toast-container" id="toastContainer"></div>
+
+      <!-- Footer -->
+      <footer class="footer">
+        <div class="container footer-container">
+          <div>
+            <strong>Comprz</strong> — Pemampat & Pengoptimal File All-in-One. Dibuat untuk kecepatan dan keamanan privasi.
+          </div>
+          <div class="footer-badges">
+            <div class="vercel-badge">
+              <svg width="12" height="12" viewBox="0 0 1155 1000" fill="currentColor">
+                <path d="m577.3 0 577.4 1000H0z"/>
+              </svg>
+              <span>Vercel Ready</span>
+            </div>
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
