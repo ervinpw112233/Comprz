@@ -1,441 +1,449 @@
-import { createIcons, icons } from 'lucide';
-import { compressImage, isHeicFile } from './modules/imageCompressor.js';
-import { compressPdf, PDF_PRESETS } from './modules/pdfCompressor.js';
-import { inspectExif } from './modules/exifDetector.js';
-import { downloadAsZip, downloadSingleFile } from './modules/zipManager.js';
+import './style.css';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
+import { PDFDocument } from 'pdf-lib';
+import JSZip from 'jszip';
+import heic2any from 'heic2any';
 
-// State management
+// Setup PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+
+// ─────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────
 const state = {
-  activeTab: 'batch', // 'batch' | 'photo' | 'pdf'
-  files: [], // Array of queue items
+  files: [],
+  activeTab: 'batch',
+  isProcessing: false,
   quality: 0.75,
-  photoQuality: 0.8,
   targetFormat: 'original',
   quickScale: 100,
-  pdfPreset: 'rekomendasi',
-  resizeMode: 'none',
+  photoQuality: 0.80,
   customWidth: null,
   customHeight: null,
-  lockAspectRatio: true,
-  currentAspectRatio: 1.0,
-  isProcessing: false
+  lockAspect: true,
+  aspectRatio: null,
+  pdfPreset: 'balanced',
 };
 
-// DOM References
-const dropzone = document.getElementById('dropzone');
-const fileInput = document.getElementById('fileInput');
-const browseBtn = document.getElementById('browseBtn');
-const queueSection = document.getElementById('queueSection');
-const queueGrid = document.getElementById('queueGrid');
-const batchBar = document.getElementById('batchBar');
-const statCount = document.getElementById('statCount');
-const statOrigSize = document.getElementById('statOrigSize');
-const statNewSize = document.getElementById('statNewSize');
-const statSavings = document.getElementById('statSavings');
-const btnDownloadAll = document.getElementById('btnDownloadAll');
-const btnClearAll = document.getElementById('btnClearAll');
-const toastContainer = document.getElementById('toastContainer');
+// PDF presets — rasterize scale + JPEG quality
+// Scale LEBIH KECIL = file lebih kecil (tapi kualitas teks menurun)
+// Text PDF = skala besar selalu lebih besar! Harus JAUH lebih kecil dari original
+const PDF_PRESETS = {
+  extreme:  { scale: 0.6,  quality: 0.35, rasterize: true,  label: 'Ekstrem'  },
+  balanced: { scale: 0.85, quality: 0.55, rasterize: true,  label: 'Seimbang' },
+  light:    { scale: 1.2,  quality: 0.75, rasterize: false, label: 'Ringan'   },
+};
 
-// Tabs
-const tabBatch = document.getElementById('tabBatch');
-const tabPhoto = document.getElementById('tabPhoto');
-const tabPdf = document.getElementById('tabPdf');
-const batchControls = document.getElementById('batchControls');
-const photoControls = document.getElementById('photoControls');
-const pdfControls = document.getElementById('pdfControls');
-const dropzoneTitle = document.getElementById('dropzoneTitle');
-const dropzoneSubtitle = document.getElementById('dropzoneSubtitle');
-const panelTitle = document.getElementById('panelTitle');
+// ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+function uid() { return 'f' + Math.random().toString(36).slice(2, 10); }
 
-// Controls
-const qualitySlider = document.getElementById('qualitySlider');
-const qualityValue = document.getElementById('qualityValue');
-const targetFormatSelect = document.getElementById('targetFormatSelect');
-const quickResizeSelect = document.getElementById('quickResizeSelect');
-const photoQualitySlider = document.getElementById('photoQualitySlider');
-const photoQualityValue = document.getElementById('photoQualityValue');
-const customWidthInput = document.getElementById('customWidthInput');
-const customHeightInput = document.getElementById('customHeightInput');
-const btnLockRatio = document.getElementById('btnLockRatio');
-const ratioStatusText = document.getElementById('ratioStatusText');
-
-// Modal Elements
-const compareModal = document.getElementById('compareModal');
-const btnCloseModal = document.getElementById('btnCloseModal');
-const modalFileName = document.getElementById('modalFileName');
-const imgOriginal = document.getElementById('imgOriginal');
-const imgCompressed = document.getElementById('imgCompressed');
-const origClipped = document.getElementById('origClipped');
-const sliderHandle = document.getElementById('sliderHandle');
-const splitWrap = document.getElementById('splitWrap');
-const modalOrigMeta = document.getElementById('modalOrigMeta');
-const modalNewMeta = document.getElementById('modalNewMeta');
-
-/**
- * Initialize Lucide icons
- */
-function refreshIcons() {
-  createIcons({ icons });
+function fmtBytes(b) {
+  if (!b || b === 0) return '0 B';
+  const k = 1024, s = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(b) / Math.log(k));
+  return (b / k ** i).toFixed(1) + ' ' + s[i];
 }
 
-/**
- * Format bytes to human readable format (KB, MB)
- */
-function formatBytes(bytes, decimals = 1) {
-  if (!bytes || bytes === 0) return '0 B';
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+function isHeic(file) {
+  const e = (file.name || '').split('.').pop().toLowerCase();
+  return e === 'heic' || e === 'heif' || (file.type || '').includes('heic') || (file.type || '').includes('heif');
 }
 
-/**
- * Toast notifications
- */
-function showToast(message, type = 'info') {
-  const toast = document.createElement('div');
-  toast.className = `toast toast-${type}`;
-  let iconName = 'info';
-  if (type === 'success') iconName = 'check-circle';
-  if (type === 'error') iconName = 'alert-circle';
-
-  toast.innerHTML = `
-    <i data-lucide="${iconName}" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
-    <span>${message}</span>
-  `;
-  toastContainer.appendChild(toast);
-  refreshIcons();
-
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateY(10px)';
-    setTimeout(() => toast.remove(), 300);
-  }, 4000);
+function isPdf(file) {
+  const e = (file.name || '').split('.').pop().toLowerCase();
+  return e === 'pdf' || (file.type || '') === 'application/pdf';
 }
 
-/**
- * Setup Tabs
- */
-function setupTabs() {
-  const tabs = [
-    { btn: tabBatch, id: 'batch', controls: batchControls, title: 'Tarik & Lepas File ke Sini', subtitle: 'Mendukung PDF, JPG, PNG, WEBP, dan HEIC. Bisa pilih puluhan file sekaligus.', panel: 'Pengaturan Kompresi Global (Semua Format)' },
-    { btn: tabPhoto, id: 'photo', controls: photoControls, title: 'Tarik & Lepas Foto untuk Kompres & Resize', subtitle: 'Ubah resolusi piksel, skala %, potong rasio, dan hilangkan metadata EXIF otomatis.', panel: 'Pengaturan Foto & Dimensi Resolusi' },
-    { btn: tabPdf, id: 'pdf', controls: pdfControls, title: 'Tarik & Lepas Dokumen PDF ke Sini', subtitle: 'Kompresi multi-halaman PDF dengan preset Ekstrem (CPNS/Email), Seimbang, atau Ringan.', panel: 'Pengaturan Tingkat Kompresi Dokumen PDF' }
-  ];
-
-  tabs.forEach(tab => {
-    tab.btn.addEventListener('click', () => {
-      tabs.forEach(t => {
-        t.btn.classList.remove('active');
-        t.btn.setAttribute('aria-selected', 'false');
-        t.controls.style.display = 'none';
-      });
-      tab.btn.classList.add('active');
-      tab.btn.setAttribute('aria-selected', 'true');
-      tab.controls.style.display = 'grid';
-
-      dropzoneTitle.textContent = tab.title;
-      dropzoneSubtitle.textContent = tab.subtitle;
-      panelTitle.textContent = tab.panel;
-
-      state.activeTab = tab.id;
-    });
-  });
+function isPng(file) {
+  const e = (file.name || '').split('.').pop().toLowerCase();
+  return e === 'png' || (file.type || '') === 'image/png';
 }
 
-/**
- * Setup Controls Events
- */
-function setupControls() {
-  // Quality Slider
-  qualitySlider.addEventListener('input', (e) => {
-    state.quality = Number(e.target.value) / 100;
-    qualityValue.textContent = `${e.target.value}%`;
-  });
-
-  photoQualitySlider.addEventListener('input', (e) => {
-    state.photoQuality = Number(e.target.value) / 100;
-    photoQualityValue.textContent = `${e.target.value}%`;
-  });
-
-  // Target Format
-  targetFormatSelect.addEventListener('change', (e) => {
-    state.targetFormat = e.target.value;
-  });
-
-  // Quick Resize
-  quickResizeSelect.addEventListener('change', (e) => {
-    state.quickScale = Number(e.target.value);
-  });
-
-  // Lock Ratio Button
-  btnLockRatio.addEventListener('click', () => {
-    state.lockAspectRatio = !state.lockAspectRatio;
-    if (state.lockAspectRatio) {
-      btnLockRatio.classList.add('locked');
-      btnLockRatio.innerHTML = '<i data-lucide="lock" style="width: 16px; height: 16px;"></i>';
-      ratioStatusText.textContent = 'Rasio Terkunci';
-    } else {
-      btnLockRatio.classList.remove('locked');
-      btnLockRatio.innerHTML = '<i data-lucide="unlock" style="width: 16px; height: 16px;"></i>';
-      ratioStatusText.textContent = 'Rasio Bebas';
-    }
-    refreshIcons();
-  });
-
-  // Custom Width / Height Inputs
-  customWidthInput.addEventListener('input', (e) => {
-    const w = Number(e.target.value);
-    state.customWidth = w;
-    if (state.lockAspectRatio && w > 0 && state.currentAspectRatio) {
-      const calculatedH = Math.round(w / state.currentAspectRatio);
-      customHeightInput.value = calculatedH;
-      state.customHeight = calculatedH;
-    }
-  });
-
-  customHeightInput.addEventListener('input', (e) => {
-    const h = Number(e.target.value);
-    state.customHeight = h;
-    if (state.lockAspectRatio && h > 0 && state.currentAspectRatio) {
-      const calculatedW = Math.round(h * state.currentAspectRatio);
-      customWidthInput.value = calculatedW;
-      state.customWidth = calculatedW;
-    }
-  });
-
-  // Preset Buttons
-  document.querySelectorAll('.btn-preset').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const w = Number(btn.dataset.w);
-      const h = Number(btn.dataset.h);
-      customWidthInput.value = w;
-      customHeightInput.value = h;
-      state.customWidth = w;
-      state.customHeight = h;
-      state.currentAspectRatio = w / h;
-      showToast(`Preset diterapkan: ${btn.textContent} (${w} x ${h} px)`, 'info');
-    });
-  });
-
-  // PDF Radio Presets
-  document.querySelectorAll('input[name="pdfPreset"]').forEach(radio => {
-    radio.addEventListener('change', (e) => {
-      state.pdfPreset = e.target.value;
-      const desc = PDF_PRESETS[state.pdfPreset]?.label || 'Preset diubah';
-      showToast(`Level PDF diatur ke: ${desc}`, 'info');
-    });
-  });
-
-  // Logo Reset
-  document.getElementById('logoBtn').addEventListener('click', () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  });
+function toast(msg, type = 'info') {
+  const c = document.getElementById('toastWrap');
+  if (!c) return;
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  const icons = { info: '💡', success: '✅', error: '❌', warning: '⚠️' };
+  el.innerHTML = `<span class="toast-icon">${icons[type] || '💡'}</span><span>${msg}</span>`;
+  c.appendChild(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, 5000);
 }
 
-/**
- * Drag and Drop & File Input Setup
- */
-function setupDropzone() {
-  ['dragenter', 'dragover'].forEach(name => {
-    dropzone.addEventListener(name, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dropzone.classList.add('dragover');
-    });
-  });
+function setProgress(id, pct, label) {
+  const bar = document.getElementById('prog_' + id);
+  const lbl = document.getElementById('progLbl_' + id);
+  if (bar) bar.style.width = Math.min(100, pct) + '%';
+  if (lbl && label) lbl.textContent = label;
+}
 
-  ['dragleave', 'drop'].forEach(name => {
-    dropzone.addEventListener(name, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dropzone.classList.remove('dragover');
-    });
-  });
+// ─────────────────────────────────────────────
+// IMAGE COMPRESSION CORE (FIXED)
+// ─────────────────────────────────────────────
+async function compressImage(file, opts = {}) {
+  const {
+    quality = 0.75,
+    targetFormat = 'original',
+    resize = { mode: 'none' },
+    onProgress = null,
+  } = opts;
 
-  dropzone.addEventListener('drop', (e) => {
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    if (droppedFiles.length > 0) {
-      handleFiles(droppedFiles);
+  if (onProgress) onProgress(10, 'Membaca file…');
+
+  let blob = file;
+  const isH = isHeic(file);
+  const isP  = isPng(file);
+
+  // HEIC → JPEG via WebAssembly
+  if (isH) {
+    if (onProgress) onProgress(25, 'Mengonversi HEIC Apple…');
+    try {
+      const conv = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.95 });
+      blob = Array.isArray(conv) ? conv[0] : conv;
+    } catch (e) {
+      throw new Error('Gagal membaca HEIC: ' + e.message);
     }
-  });
+  }
 
-  browseBtn.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', (e) => {
-    const selectedFiles = Array.from(e.target.files);
-    if (selectedFiles.length > 0) {
-      handleFiles(selectedFiles);
-    }
-    fileInput.value = ''; // Reset for re-selection
-  });
+  if (onProgress) onProgress(45, 'Merender ke canvas…');
 
-  // Paste support (Ctrl+V)
-  window.addEventListener('paste', (e) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    const pastedFiles = [];
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf('image') !== -1) {
-        const blob = items[i].getAsFile();
-        if (blob) pastedFiles.push(blob);
+  // Load image
+  const objUrl = URL.createObjectURL(blob);
+  const img = await new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = () => rej(new Error('Gagal memuat gambar. File rusak atau format tidak valid.'));
+    i.src = objUrl;
+  });
+  URL.revokeObjectURL(objUrl);
+
+  const ow = img.naturalWidth || img.width;
+  const oh = img.naturalHeight || img.height;
+
+  // Calculate output dimensions
+  let tw = ow, th = oh;
+  if (resize.mode === 'scale' && resize.scale < 100) {
+    const f = resize.scale / 100;
+    tw = Math.max(1, Math.round(ow * f));
+    th = Math.max(1, Math.round(oh * f));
+  } else if (resize.mode === 'custom' && (resize.width || resize.height)) {
+    let rw = Number(resize.width) || 0;
+    let rh = Number(resize.height) || 0;
+    if (resize.maintainAspect) {
+      const ar = ow / oh;
+      if (rw && !rh) rh = Math.round(rw / ar);
+      else if (!rw && rh) rw = Math.round(rh * ar);
+      else if (rw && rh) {
+        const s = Math.min(rw / ow, rh / oh);
+        rw = Math.round(ow * s);
+        rh = Math.round(oh * s);
       }
     }
-    if (pastedFiles.length > 0) {
-      showToast(`${pastedFiles.length} gambar ditempel dari clipboard!`, 'info');
-      handleFiles(pastedFiles);
+    tw = Math.max(1, rw || ow);
+    th = Math.max(1, rh || oh);
+  }
+
+  if (onProgress) onProgress(65, 'Mengompresi & membersihkan EXIF…');
+
+  // ── SMART FORMAT RESOLUTION ──
+  // PNG cannot be lossy-compressed via canvas. 
+  // Strategy: if targetFormat='original' and it's PNG, auto-pick WebP for real compression.
+  // If browser doesn't support WebP output, fall back to JPEG.
+  let outMime, outExt;
+
+  if (targetFormat === 'image/webp')       { outMime = 'image/webp'; outExt = 'webp'; }
+  else if (targetFormat === 'image/jpeg')  { outMime = 'image/jpeg'; outExt = 'jpg';  }
+  else if (targetFormat === 'image/png')   { outMime = 'image/png';  outExt = 'png';  }
+  else {
+    // 'original' mode
+    if (isH)  { outMime = 'image/jpeg'; outExt = 'jpg'; }
+    else if (file.type === 'image/webp' || file.name.toLowerCase().endsWith('.webp')) {
+      outMime = 'image/webp'; outExt = 'webp';
     }
-  });
-}
-
-/**
- * Handle incoming files
- */
-async function handleFiles(fileList) {
-  const supportedList = fileList.filter(file => {
-    const ext = file.name.split('.').pop().toLowerCase();
-    const isImage = file.type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].includes(ext);
-    const isPdf = file.type === 'application/pdf' || ext === 'pdf';
-    return isImage || isPdf;
-  });
-
-  if (supportedList.length === 0) {
-    showToast('Format file tidak didukung. Mohon unggah PDF, JPG, PNG, WEBP, atau HEIC.', 'error');
-    return;
+    else if (isP) {
+      // PNG: use WebP for actual compression (much more effective than PNG→PNG)
+      // Fall back to JPEG if WebP not supported
+      outMime = 'image/webp'; outExt = 'webp';
+    }
+    else { outMime = 'image/jpeg'; outExt = 'jpg'; }
   }
 
-  showToast(`Menambahkan ${supportedList.length} file ke antrean...`, 'info');
+  // Draw to canvas (strips EXIF)
+  const canvas = document.createElement('canvas');
+  canvas.width = tw;
+  canvas.height = th;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
-  for (const file of supportedList) {
-    const fileId = 'file_' + Math.random().toString(36).substr(2, 9);
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    const isHeic = isHeicFile(file);
+  // For JPEG output, fill white background (avoids black on transparent PNG)
+  if (outMime === 'image/jpeg') {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, tw, th);
+  }
+  ctx.drawImage(img, 0, 0, tw, th);
 
-    // Initial item structure
-    const item = {
-      id: fileId,
-      originalFile: file,
-      name: file.name,
-      originalSize: file.size,
-      status: 'waiting', // 'waiting' | 'processing' | 'done' | 'error'
-      isPdf,
-      isHeic,
-      progress: 0,
-      statusText: 'Menunggu...',
-      result: null,
-      exifInfo: null,
-      thumbUrl: null
-    };
+  if (onProgress) onProgress(82, 'Membangun file output…');
 
-    // If image, create temporary thumb URL
-    if (!isPdf && !isHeic) {
-      item.thumbUrl = URL.createObjectURL(file);
+  // ── QUALITY CLAMPING ──
+  // PNG: quality is ignored, we already switched to WebP above
+  // JPEG/WebP: clamp between 0.05 - 0.95
+  const q = (outMime === 'image/png')
+    ? undefined
+    : Math.max(0.05, Math.min(0.95, quality));
+
+  const tryBlob = (mime, qval) => new Promise((res, rej) => {
+    canvas.toBlob(b => b ? res(b) : rej(new Error('toBlob gagal')), mime, qval);
+  });
+
+  let resultBlob = await tryBlob(outMime, q);
+
+  // ── WEBP FALLBACK ──
+  // Some older browsers don't support WebP output — blob will be null or very large
+  if (outMime === 'image/webp' && resultBlob.size < 100) {
+    console.warn('[Comprz] WebP not supported by browser, falling back to JPEG');
+    outMime = 'image/jpeg'; outExt = 'jpg';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, tw, th);
+    ctx.drawImage(img, 0, 0, tw, th);
+    resultBlob = await tryBlob('image/jpeg', q);
+  }
+
+  console.log(`[Comprz] "${file.name}" | orig=${(file.size/1024).toFixed(1)}KB → q=${(q*100).toFixed(0)}% ${outMime} = ${(resultBlob.size/1024).toFixed(1)}KB (${((1-resultBlob.size/file.size)*100).toFixed(1)}% saved)`);
+
+  // ── SMART FALLBACK: if result is larger than original, try harder ──
+  let attempts = 0;
+  let currentQ = q;
+  while (resultBlob.size > file.size && outMime !== 'image/png' && attempts < 4) {
+    attempts++;
+    currentQ = Math.max(0.05, currentQ - 0.12);
+    resultBlob = await tryBlob(outMime, currentQ);
+    console.log(`[Comprz] Retry ${attempts}: q=${(currentQ*100).toFixed(0)}% → ${(resultBlob.size/1024).toFixed(1)}KB`);
+  }
+
+  // If file is still bigger: try the other lossy format
+  if (resultBlob.size >= file.size && outMime === 'image/webp') {
+    const jpegBlob = await tryBlob('image/jpeg', Math.max(0.05, currentQ));
+    if (jpegBlob.size < resultBlob.size) {
+      resultBlob = jpegBlob; outMime = 'image/jpeg'; outExt = 'jpg';
+      console.log('[Comprz] Switched to JPEG for better compression:', (resultBlob.size/1024).toFixed(1) + 'KB');
+    }
+  }
+
+  const isResizeOp = resize.mode !== 'none';
+  if (resultBlob.size >= file.size && !isResizeOp) {
+    console.warn(`[Comprz] ⚠️ "${file.name}": File sudah sangat teroptimasi. Hasil (${(resultBlob.size/1024).toFixed(1)}KB) >= asli (${(file.size/1024).toFixed(1)}KB). Mungkin foto dari WhatsApp/media sosial yang sudah dikompres.`);
+  }
+
+  if (onProgress) onProgress(100, 'Selesai!');
+
+  const baseName = (file.name.lastIndexOf('.') > 0)
+    ? file.name.slice(0, file.name.lastIndexOf('.'))
+    : file.name;
+
+  const finalSavedPct = (file.size - resultBlob.size) / file.size;
+  console.log(`[Comprz] ✅ Final: ${(file.size/1024).toFixed(1)}KB → ${(resultBlob.size/1024).toFixed(1)}KB (${(finalSavedPct*100).toFixed(1)}% ${finalSavedPct > 0 ? 'saved' : 'larger'})`);
+
+  return {
+    blob: resultBlob,
+    fileName: baseName + '-comprz.' + outExt,
+    mime: outMime,
+    origSize: file.size,
+    newSize: resultBlob.size,
+    origW: ow, origH: oh,
+    newW: tw, newH: th,
+    savedPct: finalSavedPct,
+    finalQuality: currentQ || q,
+    previewUrl: URL.createObjectURL(resultBlob),
+  };
+}
+
+// ─────────────────────────────────────────────
+// PDF COMPRESSION CORE — SMART DUAL STRATEGY
+//
+// Masalah lama: rasterize PDF teks → JPEG selalu lebih besar
+// karena teks vector (kecil) → raster image (besar)
+//
+// Solusi baru:
+//   1. Coba native pdf-lib compression (stream, metadata strip)
+//   2. Jika preset balanced/extreme: juga coba rasterize di scale kecil
+//   3. Selalu pakai yang hasilnya paling kecil
+//   4. Tidak pernah mengembalikan file lebih besar dari aslinya
+// ─────────────────────────────────────────────
+async function compressPdf(file, opts = {}) {
+  const { preset = 'balanced', onProgress = null } = opts;
+  const cfg = PDF_PRESETS[preset] || PDF_PRESETS.balanced;
+
+  if (onProgress) onProgress(5, 'Membuka dokumen PDF…');
+
+  const originalBytes = new Uint8Array(await file.arrayBuffer());
+  const origSize = originalBytes.byteLength;
+
+  // ── STEP 1: Native pdf-lib compression (works for all PDF types) ──
+  // Menghapus objek tidak terpakai, stream compression, metadata trim
+  if (onProgress) onProgress(12, 'Mengompresi stream native PDF…');
+  let nativeBytes;
+  let pdfLibDoc;
+  try {
+    pdfLibDoc = await PDFDocument.load(originalBytes, { ignoreEncryption: true, updateMetadata: false });
+    // Strip metadata to save space
+    pdfLibDoc.setTitle('');
+    pdfLibDoc.setAuthor('');
+    pdfLibDoc.setSubject('');
+    pdfLibDoc.setKeywords([]);
+    pdfLibDoc.setProducer('Comprz');
+    pdfLibDoc.setCreator('Comprz');
+    nativeBytes = await pdfLibDoc.save({ useObjectStreams: true, addDefaultPage: false });
+    console.log(`[Comprz PDF] Native: ${(origSize/1024).toFixed(0)}KB → ${(nativeBytes.byteLength/1024).toFixed(0)}KB`);
+  } catch (e) {
+    console.warn('[Comprz PDF] Native compression gagal:', e.message);
+    nativeBytes = originalBytes; // fallback ke asli
+  }
+
+  const numPages = pdfLibDoc?.getPageCount() || 0;
+  let finalBytes = nativeBytes; // candidate terbaik sejauh ini
+
+  // ── STEP 2: Rasterize (hanya untuk balanced & extreme) ──
+  if (cfg.rasterize) {
+    let pdfJsDoc;
+    try {
+      const loadTask = pdfjsLib.getDocument({
+        data: originalBytes,
+        cMapUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
+        cMapPacked: true,
+      });
+      pdfJsDoc = await loadTask.promise;
+    } catch (e) {
+      console.warn('[Comprz PDF] pdf.js gagal membuka:', e.message);
+      pdfJsDoc = null;
     }
 
-    state.files.push(item);
-    renderQueueCard(item);
+    if (pdfJsDoc) {
+      const n = pdfJsDoc.numPages;
+      if (onProgress) onProgress(20, `Rasterize ${n} halaman (scale ${cfg.scale})…`);
+
+      const rasterDoc = await PDFDocument.create();
+      let totalJpegBytes = 0;
+
+      for (let i = 1; i <= n; i++) {
+        const pct = Math.round(20 + ((i - 1) / n) * 68);
+        if (onProgress) onProgress(pct, `Rasterize halaman ${i}/${n}…`);
+
+        const page = await pdfJsDoc.getPage(i);
+        const vp1 = page.getViewport({ scale: 1.0 });
+        const vpR = page.getViewport({ scale: cfg.scale });
+
+        const canvas = document.createElement('canvas');
+        canvas.width  = Math.max(1, Math.round(vpR.width));
+        canvas.height = Math.max(1, Math.round(vpR.height));
+
+        const ctx = canvas.getContext('2d', { alpha: false });
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, viewport: vpR, intent: 'print' }).promise;
+
+        const jpegBlob = await new Promise((res, rej) => {
+          canvas.toBlob(
+            b => b ? res(b) : rej(new Error(`toBlob gagal hal ${i}`)),
+            'image/jpeg',
+            cfg.quality
+          );
+        });
+        const jpegBytes = new Uint8Array(await jpegBlob.arrayBuffer());
+        totalJpegBytes += jpegBytes.byteLength;
+
+        const imgEmbed = await rasterDoc.embedJpg(jpegBytes);
+        const newPage  = rasterDoc.addPage([vp1.width, vp1.height]);
+        newPage.drawImage(imgEmbed, { x: 0, y: 0, width: vp1.width, height: vp1.height });
+      }
+
+      if (onProgress) onProgress(92, 'Membangun PDF rasterized…');
+      const rasterBytes = await rasterDoc.save({ useObjectStreams: true, addDefaultPage: false });
+      console.log(`[Comprz PDF] Raster: ${n} hal, total JPEG=${(totalJpegBytes/1024).toFixed(0)}KB, PDF=${(rasterBytes.byteLength/1024).toFixed(0)}KB`);
+
+      // Hanya pakai raster jika BENAR-BENAR lebih kecil dari native
+      if (rasterBytes.byteLength < finalBytes.byteLength) {
+        finalBytes = rasterBytes;
+        console.log('[Comprz PDF] ✅ Raster dipilih (lebih kecil dari native)');
+      } else {
+        console.log('[Comprz PDF] ℹ️ Native dipilih (raster lebih besar — PDF ini text-heavy)');
+      }
+    }
   }
 
-  updateBatchSummary();
-  processQueue();
+  // ── STEP 3: Jika masih lebih besar dari aslinya, KEMBALIKAN ASLI ──
+  // Ini terjadi pada PDF yang sudah sangat teroptimasi
+  if (finalBytes.byteLength >= origSize) {
+    console.warn('[Comprz PDF] ⚠️ Semua metode gagal mengecilkan. PDF mungkin sudah optimal.');
+    finalBytes = originalBytes; // kembalikan file asli — tidak ada kerugian
+  }
+
+  if (onProgress) onProgress(97, 'Menyiapkan file…');
+
+  const blob = new Blob([finalBytes], { type: 'application/pdf' });
+  const savedPct = (origSize - blob.size) / origSize;
+  console.log(`[Comprz PDF] ✅ Final: ${(origSize/1024).toFixed(0)}KB → ${(blob.size/1024).toFixed(0)}KB | ${(savedPct*100).toFixed(1)}% ${savedPct > 0 ? 'lebih kecil ✅' : '(tidak ada perubahan)'}`);
+
+  if (onProgress) onProgress(100, savedPct > 0.01 ? `Hemat ${(savedPct*100).toFixed(0)}%! 🎉` : 'PDF sudah optimal');
+
+  const baseName = file.name.lastIndexOf('.') > 0
+    ? file.name.slice(0, file.name.lastIndexOf('.'))
+    : file.name;
+
+  return {
+    blob,
+    fileName: baseName + '-comprz.pdf',
+    mime: 'application/pdf',
+    origSize,
+    newSize: blob.size,
+    numPages: numPages || 0,
+    savedPct,
+    previewUrl: URL.createObjectURL(blob),
+  };
 }
 
-/**
- * Render single card in queue
- */
-function renderQueueCard(item) {
-  queueSection.style.display = 'block';
-  batchBar.style.display = 'flex';
-
-  const ext = item.name.split('.').pop().toUpperCase();
-  let badgeClass = 'badge-jpg';
-  if (item.isPdf) badgeClass = 'badge-pdf';
-  else if (ext === 'PNG') badgeClass = 'badge-png';
-  else if (ext === 'WEBP') badgeClass = 'badge-webp';
-  else if (ext.includes('HEIC') || ext.includes('HEIF')) badgeClass = 'badge-heic';
-
-  const card = document.createElement('div');
-  card.className = 'file-card';
-  card.id = `card_${item.id}`;
-
-  let thumbHtml = '';
-  if (item.isPdf) {
-    thumbHtml = `
-      <div class="file-thumb-wrap">
-        <i data-lucide="file-text" class="file-thumb-pdf" style="width: 28px; height: 28px;"></i>
-      </div>
-    `;
-  } else if (item.thumbUrl) {
-    thumbHtml = `
-      <div class="file-thumb-wrap">
-        <img src="${item.thumbUrl}" class="file-thumb" alt="${item.name}" />
-      </div>
-    `;
-  } else {
-    thumbHtml = `
-      <div class="file-thumb-wrap">
-        <i data-lucide="image" style="width: 24px; height: 24px; color: #a855f7;"></i>
-      </div>
-    `;
-  }
-
-  card.innerHTML = `
-    <div class="file-card-header">
-      ${thumbHtml}
-      <div class="file-info">
-        <div class="file-name" title="${item.name}">${item.name}</div>
-        <div class="file-meta-row">
-          <span class="file-badge ${badgeClass}">${ext}</span>
-          <span class="file-dimensions" id="dim_${item.id}">${formatBytes(item.originalSize)}</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="file-card-stats" id="stats_${item.id}">
-      <div class="size-compare">
-        <span class="size-orig">${formatBytes(item.originalSize)}</span>
-        <span class="size-arrow">→</span>
-        <span class="size-new" id="newSize_${item.id}">Memproses...</span>
-      </div>
-      <div class="save-pill" id="pill_${item.id}" style="background: rgba(255,255,255,0.05); color: #94a3b8; border-color: transparent;">0%</div>
-    </div>
-
-    <div class="file-card-footer">
-      <div class="exif-status-badge" id="exif_${item.id}">
-        <i data-lucide="shield" style="width: 13px; height: 13px;"></i>
-        <span>Memeriksa EXIF...</span>
-      </div>
-
-      <div class="card-btn-group">
-        <button type="button" class="btn-card compare" id="btnCompare_${item.id}" title="Bandingkan Kualitas" style="display: none;">
-          <i data-lucide="columns-2" style="width: 15px; height: 15px;"></i>
-        </button>
-        <button type="button" class="btn-card download" id="btnDl_${item.id}" title="Unduh File Ini" style="display: none;">
-          <i data-lucide="download" style="width: 15px; height: 15px;"></i>
-        </button>
-        <button type="button" class="btn-card delete" id="btnDel_${item.id}" title="Hapus dari antrean">
-          <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
-        </button>
-      </div>
-    </div>
-
-    <div class="file-progress-bar" id="prog_${item.id}" style="width: 0%;"></div>
-  `;
-
-  queueGrid.appendChild(card);
-  refreshIcons();
-
-  // Attach delete event
-  document.getElementById(`btnDel_${item.id}`).addEventListener('click', () => {
-    removeFile(item.id);
+// ─────────────────────────────────────────────
+// ZIP DOWNLOAD
+// ─────────────────────────────────────────────
+async function downloadZip(items) {
+  const zip = new JSZip();
+  const seen = new Set();
+  items.forEach(({ fileName, blob }) => {
+    let name = fileName;
+    let n = 1;
+    while (seen.has(name)) {
+      const ext = fileName.split('.').pop();
+      const base = fileName.slice(0, -(ext.length + 1));
+      name = `${base}_${n}.${ext}`;
+      n++;
+    }
+    seen.add(name);
+    zip.file(name, blob);
   });
+  const content = await zip.generateAsync({
+    type: 'blob',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
+  triggerDownload(content, 'comprz-hasil.zip');
 }
 
-/**
- * Process queue sequentially or with concurrency
- */
+function triggerDownload(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+// ─────────────────────────────────────────────
+// QUEUE PROCESSING
+// ─────────────────────────────────────────────
 async function processQueue() {
   if (state.isProcessing) return;
   state.isProcessing = true;
@@ -443,320 +451,523 @@ async function processQueue() {
   while (true) {
     const item = state.files.find(f => f.status === 'waiting');
     if (!item) break;
-
     item.status = 'processing';
-    const card = document.getElementById(`card_${item.id}`);
-    const progBar = document.getElementById(`prog_${item.id}`);
-    const newSizeEl = document.getElementById(`newSize_${item.id}`);
-    const pillEl = document.getElementById(`pill_${item.id}`);
-    const exifEl = document.getElementById(`exif_${item.id}`);
-    const dimEl = document.getElementById(`dim_${item.id}`);
-    const btnCompare = document.getElementById(`btnCompare_${item.id}`);
-    const btnDl = document.getElementById(`btnDl_${item.id}`);
 
     try {
-      // Step 1: Inspect EXIF for images
-      if (!item.isPdf) {
-        const exifResult = await inspectExif(item.originalFile);
-        item.exifInfo = exifResult;
-        if (exifResult.hasExif) {
-          exifEl.innerHTML = `<i data-lucide="shield-check" style="width: 13px; height: 13px; color: #10b981;"></i> <span>EXIF Dihapus (${exifResult.gpsFound ? 'GPS, ' : ''}Kamera)</span>`;
-        } else {
-          exifEl.innerHTML = `<i data-lucide="shield-check" style="width: 13px; height: 13px; color: #10b981;"></i> <span>Bebas EXIF</span>`;
-        }
-      } else {
-        exifEl.innerHTML = `<i data-lucide="file-check" style="width: 13px; height: 13px; color: #38bdf8;"></i> <span>PDF Dimampatkan</span>`;
-      }
-      refreshIcons();
+      let result;
 
-      // Step 2: Perform Compression
       if (item.isPdf) {
-        const res = await compressPdf(item.originalFile, {
+        result = await compressPdf(item.file, {
           preset: state.pdfPreset,
-          onProgress: (percent, text) => {
-            if (progBar) progBar.style.width = `${percent}%`;
-            if (newSizeEl) newSizeEl.textContent = text;
-          }
+          onProgress: (pct, lbl) => setProgress(item.id, pct, lbl),
         });
-        item.result = res;
-        dimEl.textContent = `${res.numPages} Halaman • ${formatBytes(res.compressedSize)}`;
       } else {
-        // Image compression options
-        let resizeConfig = { mode: 'none' };
-
+        // Build resize options
+        let resize = { mode: 'none' };
         if (state.activeTab === 'photo' && (state.customWidth || state.customHeight)) {
-          resizeConfig = {
+          resize = {
             mode: 'custom',
             width: state.customWidth,
             height: state.customHeight,
-            maintainAspectRatio: state.lockAspectRatio
+            maintainAspect: state.lockAspect,
           };
-        } else if (state.quickScale && state.quickScale < 100) {
-          resizeConfig = {
-            mode: 'scale',
-            scale: state.quickScale
-          };
+        } else if (state.quickScale < 100) {
+          resize = { mode: 'scale', scale: state.quickScale };
         }
 
-        const currentQuality = state.activeTab === 'photo' ? state.photoQuality : state.quality;
+        const quality = state.activeTab === 'photo' ? state.photoQuality : state.quality;
 
-        const res = await compressImage(item.originalFile, {
-          quality: currentQuality,
+        result = await compressImage(item.file, {
+          quality,
           targetFormat: state.targetFormat,
-          resize: resizeConfig,
-          onProgress: (percent, text) => {
-            if (progBar) progBar.style.width = `${percent}%`;
-            if (newSizeEl) newSizeEl.textContent = text;
-          }
+          resize,
+          onProgress: (pct, lbl) => setProgress(item.id, pct, lbl),
         });
-
-        item.result = res;
-        dimEl.textContent = `${res.width} × ${res.height} px • ${formatBytes(res.compressedSize)}`;
-
-        // Update thumbnail with clean result preview
-        const thumbImg = card.querySelector('.file-thumb');
-        if (thumbImg) {
-          thumbImg.src = res.previewUrl;
-        }
       }
 
       item.status = 'done';
-      if (progBar) progBar.style.width = '100%';
-      if (newSizeEl) newSizeEl.textContent = formatBytes(item.result.compressedSize);
-
-      const percent = Math.round(item.result.savedPercent);
-      if (pillEl) {
-        pillEl.textContent = `-${percent}%`;
-        pillEl.style.background = 'rgba(16, 185, 129, 0.2)';
-        pillEl.style.color = '#10b981';
-        pillEl.style.borderColor = 'rgba(16, 185, 129, 0.4)';
-      }
-
-      // Show download button
-      if (btnDl) {
-        btnDl.style.display = 'flex';
-        btnDl.onclick = () => {
-          downloadSingleFile(item.result.blob, item.result.fileName);
-          showToast(`Mengunduh: ${item.result.fileName}`, 'success');
-        };
-      }
-
-      // Show comparison button if it's an image
-      if (!item.isPdf && btnCompare) {
-        btnCompare.style.display = 'flex';
-        btnCompare.onclick = () => openComparisonModal(item);
-      }
+      item.result = result;
+      updateCard(item);
 
     } catch (err) {
-      console.error('Processing error for item:', item.name, err);
+      console.error('[Comprz Error]', item.name, err);
       item.status = 'error';
-      if (newSizeEl) newSizeEl.textContent = 'Gagal';
-      if (pillEl) {
-        pillEl.textContent = 'Error';
-        pillEl.style.background = 'rgba(239, 68, 68, 0.2)';
-        pillEl.style.color = '#ef4444';
-      }
-      showToast(`Gagal memproses ${item.name}: ${err.message}`, 'error');
+      item.errorMsg = err.message;
+      updateCard(item);
+      toast(`❌ Gagal proses "${item.name}": ${err.message}`, 'error');
     }
 
-    updateBatchSummary();
+    updateSummary();
   }
 
   state.isProcessing = false;
-  refreshIcons();
 }
 
-/**
- * Remove single file from queue
- */
-function removeFile(fileId) {
-  const index = state.files.findIndex(f => f.id === fileId);
-  if (index !== -1) {
-    const item = state.files[index];
-    if (item.thumbUrl) URL.revokeObjectURL(item.thumbUrl);
-    if (item.result?.previewUrl) URL.revokeObjectURL(item.result.previewUrl);
-    state.files.splice(index, 1);
-  }
-
-  const card = document.getElementById(`card_${fileId}`);
-  if (card) card.remove();
-
-  updateBatchSummary();
-
-  if (state.files.length === 0) {
-    queueSection.style.display = 'none';
-    batchBar.style.display = 'none';
-  }
-}
-
-/**
- * Clear all files
- */
-function clearAllFiles() {
-  state.files.forEach(item => {
-    if (item.thumbUrl) URL.revokeObjectURL(item.thumbUrl);
-    if (item.result?.previewUrl) URL.revokeObjectURL(item.result.previewUrl);
-  });
-  state.files = [];
-  queueGrid.innerHTML = '';
-  queueSection.style.display = 'none';
-  batchBar.style.display = 'none';
-  updateBatchSummary();
-  showToast('Semua antrean telah dibersihkan.', 'info');
-}
-
-/**
- * Update summary stats bar
- */
-function updateBatchSummary() {
-  const completed = state.files.filter(f => f.status === 'done' && f.result);
-  const totalCount = completed.length;
-
-  let origTotal = 0;
-  let newTotal = 0;
-
-  completed.forEach(f => {
-    origTotal += f.originalSize;
-    newTotal += f.result.compressedSize;
+// ─────────────────────────────────────────────
+// CARD UI
+// ─────────────────────────────────────────────
+function addFilesToQueue(fileList) {
+  const valid = fileList.filter(f => {
+    const ext = (f.name || '').split('.').pop().toLowerCase();
+    return ['jpg','jpeg','png','webp','heic','heif','pdf'].includes(ext)
+      || (f.type || '').startsWith('image/')
+      || (f.type || '') === 'application/pdf';
   });
 
-  const savedBytes = Math.max(0, origTotal - newTotal);
-  const savedPercent = origTotal > 0 ? Math.round((savedBytes / origTotal) * 100) : 0;
-
-  statCount.textContent = `${totalCount} / ${state.files.length}`;
-  statOrigSize.textContent = formatBytes(origTotal);
-  statNewSize.textContent = formatBytes(newTotal);
-  statSavings.textContent = `${formatBytes(savedBytes)} (-${savedPercent}%)`;
-}
-
-/**
- * Batch Download as ZIP
- */
-async function handleDownloadAll() {
-  const completed = state.files.filter(f => f.status === 'done' && f.result);
-  if (completed.length === 0) {
-    showToast('Belum ada file yang selesai dikompres.', 'error');
+  if (valid.length === 0) {
+    toast('Format tidak didukung! Gunakan JPG, PNG, WEBP, HEIC, atau PDF.', 'error');
     return;
   }
 
-  const filesForZip = completed.map(f => ({
-    fileName: f.result.fileName,
-    blob: f.result.blob
-  }));
+  valid.forEach(file => {
+    const id = uid();
+    const item = {
+      id, file,
+      name: file.name || 'unknown',
+      size: file.size,
+      isPdf: isPdf(file),
+      isHeic: isHeic(file),
+      isPng: isPng(file),
+      status: 'waiting',
+      result: null,
+      errorMsg: null,
+      thumbUrl: null,
+    };
 
-  const originalBtnText = btnDownloadAll.innerHTML;
-  btnDownloadAll.disabled = true;
-  btnDownloadAll.innerHTML = '<i data-lucide="loader" class="spin" style="width: 18px; height: 18px;"></i> <span>Membuat ZIP...</span>';
-  refreshIcons();
+    if (!item.isPdf && !item.isHeic) {
+      item.thumbUrl = URL.createObjectURL(file);
+    }
 
-  try {
-    await downloadAsZip(filesForZip, 'comprz-koleksi-hasil.zip', (percent, text) => {
-      btnDownloadAll.querySelector('span').textContent = text;
-    });
-    showToast(`Berhasil mengunduh ${filesForZip.length} file dalam format ZIP!`, 'success');
-  } catch (err) {
-    console.error('ZIP error:', err);
-    showToast('Gagal membuat file ZIP: ' + err.message, 'error');
-  } finally {
-    btnDownloadAll.disabled = false;
-    btnDownloadAll.innerHTML = originalBtnText;
-    refreshIcons();
+    state.files.push(item);
+    renderCard(item);
+  });
+
+  document.getElementById('queueSection').style.display = 'block';
+  document.getElementById('batchBar').style.display = 'flex';
+  updateSummary();
+  processQueue();
+  toast(`${valid.length} file ditambahkan ke antrean.`, 'info');
+}
+
+function getExt(name) { return (name.split('.').pop() || '').toUpperCase(); }
+function badgeColor(ext, pdf) {
+  if (pdf) return '#ef4444';
+  if (ext === 'PNG') return '#3b82f6';
+  if (ext === 'WEBP') return '#10b981';
+  if (ext === 'HEIC' || ext === 'HEIF') return '#ec4899';
+  return '#f59e0b';
+}
+
+function renderCard(item) {
+  const grid = document.getElementById('queueGrid');
+  const ext = getExt(item.name);
+  const color = badgeColor(ext, item.isPdf);
+
+  const card = document.createElement('div');
+  card.className = 'file-card';
+  card.id = 'card_' + item.id;
+
+  const thumbHtml = item.isPdf
+    ? `<div class="thumb-box pdf-thumb">PDF</div>`
+    : item.isHeic
+      ? `<div class="thumb-box heic-thumb">HEIC</div>`
+      : `<div class="thumb-box"><img src="${item.thumbUrl}" alt="" /></div>`;
+
+  const sizeKB = (item.size / 1024).toFixed(0);
+
+  card.innerHTML = `
+    <div class="card-top">
+      ${thumbHtml}
+      <div class="card-info">
+        <div class="card-name" title="${item.name}">${item.name}</div>
+        <div class="card-meta">
+          <span class="ext-badge" style="background:${color}20;color:${color};border-color:${color}50">${ext}</span>
+          <span class="card-size" id="cardSize_${item.id}">${fmtBytes(item.size)}</span>
+        </div>
+        <div class="card-status" id="cardStatus_${item.id}">
+          <span class="status-dot waiting"></span> Menunggu…
+        </div>
+      </div>
+      <button class="btn-del" id="del_${item.id}" title="Hapus dari antrean">✕</button>
+    </div>
+    <div class="card-progress">
+      <div class="prog-track">
+        <div class="prog-bar" id="prog_${item.id}" style="width:0%"></div>
+      </div>
+      <span class="prog-label" id="progLbl_${item.id}"></span>
+    </div>
+    <div class="card-bottom" id="cardBottom_${item.id}" style="display:none">
+      <div class="size-row">
+        <span class="size-before">${fmtBytes(item.size)}</span>
+        <span class="size-arrow">→</span>
+        <span class="size-after" id="sizeAfter_${item.id}">—</span>
+        <span class="save-badge" id="saveBadge_${item.id}"></span>
+      </div>
+      <div class="exif-row">
+        <span class="exif-tag">🛡 EXIF & GPS Dihapus Otomatis</span>
+      </div>
+      <div class="card-btns">
+        <button class="btn-compare" id="btnCmp_${item.id}" style="display:none">👁 Bandingkan</button>
+        <button class="btn-dl"      id="btnDl_${item.id}"  style="display:none">⬇ Unduh</button>
+      </div>
+    </div>
+  `;
+
+  grid.appendChild(card);
+  document.getElementById('del_' + item.id).onclick = () => removeFile(item.id);
+}
+
+function updateCard(item) {
+  const statusEl  = document.getElementById('cardStatus_' + item.id);
+  const bottomEl  = document.getElementById('cardBottom_' + item.id);
+  const sizeAfter = document.getElementById('sizeAfter_'  + item.id);
+  const saveBadge = document.getElementById('saveBadge_'  + item.id);
+  const btnDl     = document.getElementById('btnDl_'      + item.id);
+  const btnCmp    = document.getElementById('btnCmp_'     + item.id);
+  const progBar   = document.getElementById('prog_'       + item.id);
+  const progLbl   = document.getElementById('progLbl_'    + item.id);
+  const cardSizeEl= document.getElementById('cardSize_'   + item.id);
+
+  if (item.status === 'done' && item.result) {
+    const r = item.result;
+    const pctNum = Math.round(r.savedPct * 100);
+    const saved = pctNum > 0;
+
+    // Progress bar
+    if (progBar) {
+      progBar.style.width = '100%';
+      progBar.style.background = saved
+        ? 'linear-gradient(90deg,#10b981,#34d399)'
+        : 'linear-gradient(90deg,#f59e0b,#fbbf24)';
+    }
+    if (progLbl) progLbl.textContent = saved ? '✅ Selesai!' : '⚠️ Ukuran tidak berkurang';
+
+    if (statusEl) {
+      statusEl.innerHTML = saved
+        ? '<span class="status-dot done"></span> Selesai'
+        : '<span class="status-dot warn"></span> Sudah optimal';
+    }
+
+    if (bottomEl) bottomEl.style.display = 'block';
+    if (sizeAfter) sizeAfter.textContent = fmtBytes(r.newSize);
+
+    if (cardSizeEl && item.isPdf) {
+      cardSizeEl.textContent = `${r.numPages} halaman • ${fmtBytes(item.size)}`;
+    }
+
+    if (saveBadge) {
+      if (saved) {
+        saveBadge.textContent   = `-${pctNum}%`;
+        saveBadge.style.cssText = 'background:rgba(16,185,129,.18);color:#10b981;border:1px solid rgba(16,185,129,.4);border-radius:9999px;padding:2px 8px;font-size:.75rem;font-weight:700';
+      } else {
+        const over = Math.abs(pctNum);
+        saveBadge.textContent   = over > 0 ? `+${over}%` : '=';
+        saveBadge.style.cssText = 'background:rgba(245,158,11,.18);color:#f59e0b;border:1px solid rgba(245,158,11,.4);border-radius:9999px;padding:2px 8px;font-size:.75rem;font-weight:700';
+      }
+    }
+
+    // Update thumbnail for images
+    if (!item.isPdf && r.previewUrl) {
+      const thumbImg = document.querySelector(`#card_${item.id} .thumb-box img`);
+      if (thumbImg) thumbImg.src = r.previewUrl;
+    }
+
+    if (btnDl) {
+      btnDl.style.display = 'inline-flex';
+      btnDl.onclick = () => {
+        triggerDownload(r.blob, r.fileName);
+        toast(`Mengunduh ${r.fileName}`, 'success');
+      };
+    }
+
+    if (btnCmp && !item.isPdf) {
+      btnCmp.style.display = 'inline-flex';
+      btnCmp.onclick = () => openModal(item);
+    }
+
+  } else if (item.status === 'error') {
+    if (progBar) { progBar.style.width = '100%'; progBar.style.background = '#ef4444'; }
+    if (progLbl) progLbl.textContent = '❌ Gagal diproses';
+    if (statusEl) statusEl.innerHTML = `<span class="status-dot error"></span> Error: ${item.errorMsg || 'Unknown'}`;
   }
 }
 
-/**
- * Open Image Comparison Modal with interactive split slider
- */
-function openComparisonModal(item) {
+function removeFile(id) {
+  const idx = state.files.findIndex(f => f.id === id);
+  if (idx >= 0) {
+    const item = state.files[idx];
+    if (item.thumbUrl) URL.revokeObjectURL(item.thumbUrl);
+    if (item.result?.previewUrl) URL.revokeObjectURL(item.result.previewUrl);
+    state.files.splice(idx, 1);
+  }
+  document.getElementById('card_' + id)?.remove();
+  updateSummary();
+  if (state.files.length === 0) {
+    document.getElementById('queueSection').style.display = 'none';
+    document.getElementById('batchBar').style.display = 'none';
+  }
+}
+
+// ─────────────────────────────────────────────
+// SUMMARY BAR
+// ─────────────────────────────────────────────
+function updateSummary() {
+  const done = state.files.filter(f => f.status === 'done' && f.result);
+  let origTotal = 0, newTotal = 0;
+  done.forEach(f => { origTotal += f.size; newTotal += f.result.newSize; });
+  const savedBytes = Math.max(0, origTotal - newTotal);
+  const savedPct   = origTotal > 0 ? Math.round(savedBytes / origTotal * 100) : 0;
+
+  document.getElementById('statFiles').textContent = `${done.length}/${state.files.length}`;
+  document.getElementById('statOrig').textContent  = fmtBytes(origTotal);
+  document.getElementById('statNew').textContent   = fmtBytes(newTotal);
+  document.getElementById('statSaved').textContent = `${fmtBytes(savedBytes)} (-${savedPct}%)`;
+}
+
+// ─────────────────────────────────────────────
+// COMPARISON MODAL
+// ─────────────────────────────────────────────
+let _modalCleanup = null;
+
+function openModal(item) {
   if (!item.result) return;
 
-  modalFileName.textContent = `Perbandingan: ${item.name}`;
-  imgCompressed.src = item.result.previewUrl;
+  const modal     = document.getElementById('modal');
+  const imgBefore = document.getElementById('imgBefore');
+  const imgAfter  = document.getElementById('imgAfter');
+  const beforeClip= document.getElementById('beforeClip');
+  const handle    = document.getElementById('splitHandle');
+  const metaBefore= document.getElementById('metaBefore');
+  const metaAfter = document.getElementById('metaAfter');
+  const wrap      = document.getElementById('splitWrap');
 
-  // Use original object URL or create one
-  const origSrc = item.thumbUrl || URL.createObjectURL(item.originalFile);
-  imgOriginal.src = origSrc;
+  const origSrc = item.thumbUrl || URL.createObjectURL(item.file);
+  imgBefore.src = origSrc;
+  imgAfter.src  = item.result.previewUrl;
 
-  modalOrigMeta.textContent = `${formatBytes(item.originalSize)} (${item.result.originalWidth} × ${item.result.originalHeight} px)`;
-  modalNewMeta.textContent = `${formatBytes(item.result.compressedSize)} (${item.result.width} × ${item.result.height} px, -${Math.round(item.result.savedPercent)}%)`;
+  document.getElementById('modalTitle').textContent = item.name;
+  metaBefore.textContent = `Asli: ${fmtBytes(item.size)} | ${item.result.origW}×${item.result.origH}px`;
+  metaAfter.textContent  = `Hasil: ${fmtBytes(item.result.newSize)} | ${item.result.newW}×${item.result.newH}px | ${Math.round(item.result.savedPct * 100)}% lebih kecil`;
 
-  // Reset slider position to 50%
-  setSliderPos(50);
-  compareModal.classList.add('open');
-  refreshIcons();
-}
+  setSplit(50);
+  modal.style.display = 'flex';
+  setTimeout(() => modal.classList.add('open'), 10);
 
-/**
- * Split slider position update
- */
-function setSliderPos(percent) {
-  const clamped = Math.max(0, Math.min(100, percent));
-  origClipped.style.width = `${clamped}%`;
-  sliderHandle.style.left = `${clamped}%`;
-}
-
-/**
- * Comparison modal slider interaction
- */
-function setupCompareSlider() {
-  let isDragging = false;
-
+  // Split slider drag
+  let dragging = false;
   const onMove = (e) => {
-    if (!isDragging) return;
-    const rect = splitWrap.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const offsetX = clientX - rect.left;
-    const percent = (offsetX / rect.width) * 100;
-    setSliderPos(percent);
+    if (!dragging) return;
+    const rect = wrap.getBoundingClientRect();
+    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    setSplit((x / rect.width) * 100);
   };
+  const onUp = () => { dragging = false; };
+  const onStart = (e) => { e.preventDefault(); dragging = true; };
 
-  const onStop = () => {
-    isDragging = false;
+  handle.addEventListener('mousedown', onStart);
+  handle.addEventListener('touchstart', onStart, { passive: false });
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  window.addEventListener('touchmove', onMove, { passive: true });
+  window.addEventListener('touchend', onUp);
+
+  if (_modalCleanup) _modalCleanup();
+  _modalCleanup = () => {
+    handle.removeEventListener('mousedown', onStart);
+    handle.removeEventListener('touchstart', onStart);
     window.removeEventListener('mousemove', onMove);
-    window.removeEventListener('mouseup', onStop);
+    window.removeEventListener('mouseup', onUp);
     window.removeEventListener('touchmove', onMove);
-    window.removeEventListener('touchend', onStop);
+    window.removeEventListener('touchend', onUp);
   };
-
-  const onStart = (e) => {
-    isDragging = true;
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onStop);
-    window.addEventListener('touchmove', onMove);
-    window.addEventListener('touchend', onStop);
-  };
-
-  sliderHandle.addEventListener('mousedown', onStart);
-  sliderHandle.addEventListener('touchstart', onStart);
-
-  btnCloseModal.addEventListener('click', () => {
-    compareModal.classList.remove('open');
-  });
-
-  compareModal.addEventListener('click', (e) => {
-    if (e.target === compareModal) {
-      compareModal.classList.remove('open');
-    }
-  });
-
-  // ESC key to close modal
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && compareModal.classList.contains('open')) {
-      compareModal.classList.remove('open');
-    }
-  });
 }
 
-// Global initialization
+function setSplit(pct) {
+  const p = Math.max(0, Math.min(100, pct));
+  document.getElementById('beforeClip').style.width  = p + '%';
+  document.getElementById('splitHandle').style.left  = p + '%';
+}
+
+function closeModal() {
+  const modal = document.getElementById('modal');
+  modal.classList.remove('open');
+  setTimeout(() => { modal.style.display = 'none'; }, 300);
+  if (_modalCleanup) { _modalCleanup(); _modalCleanup = null; }
+}
+
+// ─────────────────────────────────────────────
+// TAB SWITCHING
+// ─────────────────────────────────────────────
+function switchTab(tab) {
+  state.activeTab = tab;
+  ['batch', 'photo', 'pdf'].forEach(t => {
+    document.getElementById('tab_' + t).classList.toggle('active', t === tab);
+    document.getElementById('ctrl_' + t).style.display = t === tab ? 'block' : 'none';
+  });
+
+  const dzTitle  = document.getElementById('dzTitle');
+  const dzSub    = document.getElementById('dzSub');
+  const fileInput= document.getElementById('fileInput');
+
+  if (tab === 'batch') {
+    dzTitle.textContent  = 'Tarik & Lepas File di Sini';
+    dzSub.textContent    = 'PDF, JPG, PNG, WEBP, HEIC — bisa puluhan sekaligus';
+    fileInput.accept     = '.jpg,.jpeg,.png,.webp,.heic,.heif,.pdf,image/*,application/pdf';
+  } else if (tab === 'photo') {
+    dzTitle.textContent  = 'Tarik & Lepas Foto untuk Kompres + Resize';
+    dzSub.textContent    = 'JPG, PNG, WEBP, HEIC — kontrol resolusi & EXIF wipe';
+    fileInput.accept     = '.jpg,.jpeg,.png,.webp,.heic,.heif,image/*';
+  } else {
+    dzTitle.textContent  = 'Tarik & Lepas Dokumen PDF';
+    dzSub.textContent    = 'Kompres multi-halaman PDF hingga 80% lebih kecil';
+    fileInput.accept     = '.pdf,application/pdf';
+  }
+}
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  setupTabs();
-  setupControls();
-  setupDropzone();
-  setupCompareSlider();
 
-  btnDownloadAll.addEventListener('click', handleDownloadAll);
-  btnClearAll.addEventListener('click', clearAllFiles);
+  // Tab buttons
+  document.getElementById('tab_batch').onclick = () => switchTab('batch');
+  document.getElementById('tab_photo').onclick = () => switchTab('photo');
+  document.getElementById('tab_pdf').onclick   = () => switchTab('pdf');
 
-  refreshIcons();
-  console.log('Comprz v1.0 running smoothly!');
+  // Dropzone
+  const dz = document.getElementById('dropzone');
+  const fi = document.getElementById('fileInput');
+
+  dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('dz-over'); });
+  dz.addEventListener('dragleave', ()=> dz.classList.remove('dz-over'));
+  dz.addEventListener('dragend',   ()=> dz.classList.remove('dz-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault();
+    dz.classList.remove('dz-over');
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length) addFilesToQueue(files);
+  });
+
+  document.getElementById('btnBrowse').onclick = () => fi.click();
+  fi.onchange = e => {
+    const files = Array.from(e.target.files);
+    if (files.length) addFilesToQueue(files);
+    fi.value = '';
+  };
+
+  // Paste support (Ctrl+V)
+  window.addEventListener('paste', e => {
+    const items = Array.from(e.clipboardData?.items || []);
+    const files = items
+      .filter(i => i.type.startsWith('image/'))
+      .map(i => i.getAsFile())
+      .filter(Boolean);
+    if (files.length) { toast(`${files.length} gambar ditempel!`, 'info'); addFilesToQueue(files); }
+  });
+
+  // ── Batch controls ──
+  const qs = document.getElementById('qualitySlider');
+  const qv = document.getElementById('qualityVal');
+  qs.oninput = () => { state.quality = qs.value / 100; qv.textContent = qs.value + '%'; };
+
+  const fmt = document.getElementById('formatSelect');
+  fmt.onchange = () => { state.targetFormat = fmt.value; };
+
+  const qrs = document.getElementById('quickResizeSelect');
+  qrs.onchange = () => { state.quickScale = Number(qrs.value); };
+
+  // ── Photo controls ──
+  const pqs = document.getElementById('photoQualitySlider');
+  const pqv = document.getElementById('photoQualityVal');
+  pqs.oninput = () => { state.photoQuality = pqs.value / 100; pqv.textContent = pqs.value + '%'; };
+
+  const widthInp  = document.getElementById('widthInp');
+  const heightInp = document.getElementById('heightInp');
+  const lockBtn   = document.getElementById('lockBtn');
+  const lockLabel = document.getElementById('lockLabel');
+
+  lockBtn.onclick = () => {
+    state.lockAspect = !state.lockAspect;
+    lockBtn.textContent  = state.lockAspect ? '🔒' : '🔓';
+    lockLabel.textContent= state.lockAspect ? 'Terkunci' : 'Bebas';
+  };
+
+  widthInp.oninput = () => {
+    state.customWidth = Number(widthInp.value) || null;
+    if (state.lockAspect && state.aspectRatio && state.customWidth) {
+      state.customHeight = Math.round(state.customWidth / state.aspectRatio);
+      heightInp.value    = state.customHeight;
+    }
+  };
+
+  heightInp.oninput = () => {
+    state.customHeight = Number(heightInp.value) || null;
+    if (state.lockAspect && state.aspectRatio && state.customHeight) {
+      state.customWidth = Math.round(state.customHeight * state.aspectRatio);
+      widthInp.value    = state.customWidth;
+    }
+  };
+
+  // Preset size buttons
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.onclick = () => {
+      const w = Number(btn.dataset.w), h = Number(btn.dataset.h);
+      state.customWidth = w; state.customHeight = h; state.aspectRatio = w / h;
+      widthInp.value = w; heightInp.value = h;
+      document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      toast(`Preset: ${btn.textContent} (${w}×${h}px)`, 'info');
+    };
+  });
+
+  // ── PDF preset radio cards ──
+  document.querySelectorAll('input[name="pdfPreset"]').forEach(r => {
+    r.onchange = () => {
+      state.pdfPreset = r.value;
+      document.querySelectorAll('.pdf-preset-card').forEach(c => c.classList.remove('selected'));
+      r.closest('.pdf-preset-card').classList.add('selected');
+    };
+  });
+
+  // ── Download All ZIP ──
+  document.getElementById('btnDownloadAll').onclick = async () => {
+    const done = state.files.filter(f => f.status === 'done' && f.result);
+    if (!done.length) { toast('Belum ada file yang selesai dikompres.', 'error'); return; }
+    const btn = document.getElementById('btnDownloadAll');
+    btn.disabled = true; btn.textContent = '⏳ Membuat ZIP…';
+    try {
+      await downloadZip(done.map(f => ({ fileName: f.result.fileName, blob: f.result.blob })));
+      toast(`${done.length} file dikemas dalam ZIP! ✅`, 'success');
+    } catch (e) {
+      toast('Gagal membuat ZIP: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '⬇ Unduh Semua (.ZIP)';
+    }
+  };
+
+  // ── Clear All ──
+  document.getElementById('btnClearAll').onclick = () => {
+    state.files.forEach(f => {
+      if (f.thumbUrl) URL.revokeObjectURL(f.thumbUrl);
+      if (f.result?.previewUrl) URL.revokeObjectURL(f.result.previewUrl);
+    });
+    state.files = [];
+    document.getElementById('queueGrid').innerHTML = '';
+    document.getElementById('queueSection').style.display = 'none';
+    document.getElementById('batchBar').style.display = 'none';
+    updateSummary();
+    toast('Semua antrean dibersihkan.', 'info');
+  };
+
+  // ── Modal ──
+  document.getElementById('btnCloseModal').onclick = closeModal;
+  document.getElementById('modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('modal')) closeModal();
+  });
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+  // Init tab
+  switchTab('batch');
+  console.log('✅ Comprz v1.1 ready — compression engine loaded!');
 });

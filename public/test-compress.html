@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Comprz — Compression Diagnostic</title>
+  <style>
+    body { font-family: monospace; background: #111; color: #eee; padding: 20px; }
+    h2 { color: #a78bfa; }
+    .result { background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 16px; margin: 12px 0; }
+    .ok  { color: #34d399; }
+    .bad { color: #f87171; }
+    .warn { color: #fbbf24; }
+    button { background: #6366f1; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; margin: 8px; }
+    button:hover { background: #4f46e5; }
+    #output { white-space: pre-wrap; }
+    input[type=file] { color: #eee; margin: 8px; }
+  </style>
+</head>
+<body>
+<h2>⚡ Comprz — Diagnostik Kompresi</h2>
+
+<div class="result">
+  <h3>Test 1: Synthetic Canvas Compression</h3>
+  <button onclick="runSyntheticTest()">▶ Jalankan Test Sintetik</button>
+  <div id="synth-output"></div>
+</div>
+
+<div class="result">
+  <h3>Test 2: Kompres File Nyata (Upload File Anda)</h3>
+  <input type="file" id="realFile" accept="image/*,.pdf" />
+  <button onclick="testRealFile()">▶ Test File Nyata</button>
+  <div id="real-output"></div>
+</div>
+
+<div class="result">
+  <h3>Log Output</h3>
+  <div id="output">Klik tombol untuk mulai...</div>
+</div>
+
+<script>
+function log(msg, cls='') {
+  const el = document.getElementById('output');
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = msg;
+  el.appendChild(line);
+}
+
+function fmtBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(2) + ' MB';
+}
+
+async function runSyntheticTest() {
+  const out = document.getElementById('synth-output');
+  out.innerHTML = '<em>Menjalankan...</em>';
+  log('═══ TEST SINTETIK MULAI ═══');
+  
+  // Create 1500x1500 colorful canvas
+  const canvas = document.createElement('canvas');
+  canvas.width = 1500; canvas.height = 1500;
+  const ctx = canvas.getContext('2d');
+  
+  const grad = ctx.createLinearGradient(0, 0, 1500, 1500);
+  grad.addColorStop(0,   '#ff6b6b');
+  grad.addColorStop(0.33,'#4ecdc4');
+  grad.addColorStop(0.66,'#a29bfe');
+  grad.addColorStop(1,   '#fd79a8');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 1500, 1500);
+  
+  for (let i = 0; i < 2000; i++) {
+    ctx.fillStyle = `rgba(${Math.random()*255|0},${Math.random()*255|0},${Math.random()*255|0},0.7)`;
+    ctx.beginPath();
+    ctx.arc(Math.random()*1500, Math.random()*1500, Math.random()*15+2, 0, Math.PI*2);
+    ctx.fill();
+  }
+  
+  const toBlob = (mime, q) => new Promise(r => canvas.toBlob(r, mime, q));
+  
+  // Source: "quality 99" JPEG (simulate large original)
+  const src = await toBlob('image/jpeg', 0.99);
+  log(`📁 Source (JPEG q=99%): ${fmtBytes(src.size)}`);
+  
+  const tests = [
+    { mime: 'image/jpeg', q: 0.75, label: 'JPEG q=75%' },
+    { mime: 'image/jpeg', q: 0.60, label: 'JPEG q=60%' },
+    { mime: 'image/jpeg', q: 0.40, label: 'JPEG q=40%' },
+    { mime: 'image/webp', q: 0.80, label: 'WebP q=80%' },
+    { mime: 'image/webp', q: 0.60, label: 'WebP q=60%' },
+  ];
+  
+  for (const t of tests) {
+    const b = await toBlob(t.mime, t.q);
+    const pct = ((1 - b.size/src.size)*100).toFixed(1);
+    const cls = b.size < src.size ? 'ok' : 'bad';
+    log(`  ${t.label}: ${fmtBytes(b.size)} → ${pct > 0 ? '-' : '+'}${Math.abs(pct)}% ${b.size < src.size ? '✅' : '❌ LEBIH BESAR!'}`, cls);
+  }
+  
+  // WebP support check
+  const webpTest = await toBlob('image/webp', 0.8);
+  const webpOk = webpTest && webpTest.size > 100 && webpTest.type === 'image/webp';
+  log(`\n🌐 WebP Output Support: ${webpOk ? '✅ Didukung' : '❌ TIDAK Didukung'}`, webpOk ? 'ok' : 'bad');
+  
+  log('═══ TEST SELESAI ═══\n');
+  out.innerHTML = '<span style="color:#34d399">✅ Test selesai! Lihat log di bawah.</span>';
+}
+
+async function testRealFile() {
+  const file = document.getElementById('realFile').files[0];
+  if (!file) { alert('Pilih file dulu!'); return; }
+  
+  const out = document.getElementById('real-output');
+  out.innerHTML = '<em>Memproses...</em>';
+  log(`\n═══ TEST FILE NYATA: "${file.name}" (${fmtBytes(file.size)}) ═══`);
+  log(`  Type: ${file.type || 'tidak diketahui'}`);
+  
+  const ext = file.name.split('.').pop().toLowerCase();
+  const isPng = ext === 'png' || file.type === 'image/png';
+  const isJpeg = ext === 'jpg' || ext === 'jpeg' || file.type === 'image/jpeg';
+  const isWebP = ext === 'webp' || file.type === 'image/webp';
+  
+  if (file.type === 'application/pdf') {
+    log('📄 PDF File — Kompresi via canvas render (perlu pdfjs). Cek di app utama.', 'warn');
+    out.innerHTML = '<span class="warn">⚠️ PDF: Gunakan halaman utama untuk test.</span>';
+    return;
+  }
+  
+  // Load image
+  const url = URL.createObjectURL(file);
+  const img = await new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = () => rej(new Error('Gagal load gambar'));
+    i.src = url;
+  });
+  URL.revokeObjectURL(url);
+  
+  log(`  Dimensi: ${img.naturalWidth}×${img.naturalHeight}px`);
+  
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0);
+  
+  const toBlob = (mime, q) => new Promise(r => canvas.toBlob(r, mime, q));
+  
+  log(`\n  Format asli: ${isPng ? 'PNG' : isJpeg ? 'JPEG' : isWebP ? 'WebP' : 'Lainnya'}`);
+  
+  if (isPng) {
+    log('  ⚠️ PNG: Canvas tidak bisa lossy compress PNG. Akan menggunakan WebP...', 'warn');
+    const webpBlob = await toBlob('image/webp', 0.80);
+    const jpgBlob  = await toBlob('image/jpeg', 0.80);
+    const pngBlob  = await toBlob('image/png');
+    log(`  PNG→PNG  (lossless): ${fmtBytes(pngBlob.size)} vs asli ${fmtBytes(file.size)}`, pngBlob.size < file.size ? 'ok' : 'bad');
+    log(`  PNG→WebP (q=80%): ${fmtBytes(webpBlob.size)} → ${((1-webpBlob.size/file.size)*100).toFixed(1)}% lebih kecil`, webpBlob.size < file.size ? 'ok' : 'bad');
+    log(`  PNG→JPG  (q=80%): ${fmtBytes(jpgBlob.size)} → ${((1-jpgBlob.size/file.size)*100).toFixed(1)}% lebih kecil`, jpgBlob.size < file.size ? 'ok' : 'bad');
+  } else {
+    const qualities = [0.80, 0.65, 0.50, 0.35];
+    for (const q of qualities) {
+      const b = await toBlob('image/jpeg', q);
+      const pct = ((1 - b.size/file.size)*100).toFixed(1);
+      log(`  JPEG q=${(q*100).toFixed(0)}%: ${fmtBytes(b.size)} (${pct > 0 ? '-' : '+'}${Math.abs(pct)}%)`, b.size < file.size ? 'ok' : 'bad');
+    }
+    const webpB = await toBlob('image/webp', 0.80);
+    const pctW = ((1 - webpB.size/file.size)*100).toFixed(1);
+    log(`  WebP q=80%: ${fmtBytes(webpB.size)} (${pctW > 0 ? '-' : '+'}${Math.abs(pctW)}%)`, webpB.size < file.size ? 'ok' : 'bad');
+  }
+  
+  log('\n━━━ KESIMPULAN ━━━');
+  log('Jika semua baris di atas menunjukkan ukuran LEBIH BESAR (+%) dari file asli,');
+  log('berarti file asli sudah sangat teroptimasi dan tidak bisa dikompres lagi via canvas.');
+  log('Ini NORMAL untuk foto yang sudah dikompres berat (misalnya WhatsApp photo).');
+  log('Solusi: coba file foto RAW atau foto berkualitas tinggi dari kamera.');
+  
+  out.innerHTML = '<span style="color:#34d399">✅ Test selesai! Lihat log di bawah.</span>';
+}
+</script>
+</body>
+</html>
